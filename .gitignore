@@ -1,0 +1,17 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# PyInstaller / Build outputs
+build/
+dist/
+*.spec
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Local system files
+.DS_Store
+Thumbs.db
