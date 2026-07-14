@@ -47,11 +47,11 @@ import math
 import time
 from collections import defaultdict
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QIcon, QAction
+from PySide6.QtCore import Qt, QTimer, QRectF
+from PySide6.QtGui import QPixmap, QIcon, QAction, QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication, QLabel, QMainWindow, QSystemTrayIcon, QMenu,
-    QWidget, QVBoxLayout, QPushButton,
+    QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QFrame,
 )
 from pynput import mouse, keyboard
 
@@ -358,7 +358,7 @@ class DesktopPet(QMainWindow):
         if hasattr(self, "toggle_walk_action"):
             self.toggle_walk_action.setText(label)
         if self.control_panel is not None:
-            self.control_panel.walk_btn.setText(label)
+            self.control_panel.set_walk_state(self.mode == "WALKING")
 
     def _tray_toggle_walk(self):
         if self.mode == "WALKING":
@@ -394,6 +394,8 @@ class DesktopPet(QMainWindow):
         self.show()
         if hasattr(self, "toggle_visibility_action"):
             self.toggle_visibility_action.setText("Hide Cat")
+        if self.control_panel is not None:
+            self.control_panel.refresh()
 
     def hide_cat(self):
         """Remove the cat from the screen. The app keeps running (tray
@@ -402,6 +404,8 @@ class DesktopPet(QMainWindow):
         self.hide()
         if hasattr(self, "toggle_visibility_action"):
             self.toggle_visibility_action.setText("Show Cat")
+        if self.control_panel is not None:
+            self.control_panel.refresh()
 
     # ------------------------------------------------------------------ #
     # Mouse interaction: drag vs single-click vs double-click
@@ -652,38 +656,120 @@ class DesktopPet(QMainWindow):
         self._show_frame(path)
 
 
+class ToggleSwitch(QPushButton):
+    """A compact, image-free switch for the cat presence control."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(52, 30)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet("border: none; background: transparent;")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#8067FF") if self.isChecked() else QColor("#39394F"))
+        painter.drawRoundedRect(QRectF(1, 4, 50, 22), 11, 11)
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawEllipse(QRectF(29 if self.isChecked() else 5, 6, 18, 18))
+
+
 class ControlPanel(QWidget):
-    """A small, ordinary titled window (shows in the taskbar, can be
-    minimized) with buttons to bring the cat onto the screen or remove it,
-    toggle chase mode, and quit -- the explicit "click a button" UI, as an
-    alternative to the tray icon and hotkeys."""
+    """A visual, focused control dashboard for the desktop cat."""
 
     def __init__(self, pet):
         super().__init__()
         self.pet = pet
-        self.setWindowTitle("Desktop Cat Control")
-        self.setFixedWidth(220)
+        self._refreshing = False
+        self.setWindowTitle("Desktop Cat")
+        self.setFixedSize(390, 490)
+        self.setStyleSheet("""
+            QWidget { background: #12121D; color: #F7F6FF; font-family: 'Segoe UI'; }
+            QFrame#card { background: #1D1D2C; border: 1px solid #2D2D43; border-radius: 18px; }
+            QLabel#eyebrow { color: #A8A7C0; font-size: 10px; font-weight: 700; }
+            QLabel#subtle { color: #AAA9C4; font-size: 12px; }
+            QLabel#badge { background: #243E36; color: #91F2C7; border-radius: 10px; font-size: 11px; font-weight: 700; padding: 4px 8px; }
+            QPushButton#primary { background: #8067FF; border: none; border-radius: 12px; color: white; font-size: 13px; font-weight: 700; padding: 13px; }
+            QPushButton#primary:hover { background: #967FFF; }
+            QPushButton#secondary { background: transparent; border: 1px solid #3B3B52; border-radius: 12px; color: #CECDDC; font-size: 13px; font-weight: 600; padding: 11px; }
+            QPushButton#secondary:hover { background: #252538; color: white; }
+        """)
 
-        layout = QVBoxLayout(self)
+        avatar_path = pet.asset_lib.get_single("Pick") or pet._first_available_sprite()
+        if avatar_path:
+            self.setWindowIcon(QIcon(avatar_path))
 
-        self.show_btn = QPushButton("Show Cat")
-        self.show_btn.clicked.connect(self.pet.show_cat)
-        layout.addWidget(self.show_btn)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 22, 24, 22)
+        root.setSpacing(16)
+        header = QHBoxLayout()
+        titles = QVBoxLayout()
+        eyebrow = QLabel("DESKTOP COMPANION")
+        eyebrow.setObjectName("eyebrow")
+        title = QLabel("Cat control")
+        title.setStyleSheet("font-size: 25px; font-weight: 700;")
+        titles.addWidget(eyebrow); titles.addWidget(title)
+        header.addLayout(titles); header.addStretch()
+        self.badge = QLabel()
+        self.badge.setObjectName("badge")
+        header.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
+        root.addLayout(header)
 
-        self.hide_btn = QPushButton("Hide Cat")
-        self.hide_btn.clicked.connect(self.pet.hide_cat)
-        layout.addWidget(self.hide_btn)
+        hero = QFrame(); hero.setObjectName("card")
+        hero_layout = QHBoxLayout(hero); hero_layout.setContentsMargins(18, 16, 18, 16)
+        preview = QLabel(); preview.setFixedSize(126, 126); preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if avatar_path:
+            preview.setPixmap(QPixmap(avatar_path).scaled(118, 118, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        hero_layout.addWidget(preview)
+        copy = QVBoxLayout()
+        self.presence_title = QLabel(); self.presence_title.setStyleSheet("font-size: 17px; font-weight: 700;")
+        self.presence_detail = QLabel(); self.presence_detail.setObjectName("subtle"); self.presence_detail.setWordWrap(True)
+        copy.addWidget(self.presence_title); copy.addWidget(self.presence_detail); copy.addStretch()
+        hero_layout.addLayout(copy, 1)
+        root.addWidget(hero)
 
-        self.walk_btn = QPushButton("Start Following Cursor")
+        settings = QFrame(); settings.setObjectName("card")
+        settings_layout = QHBoxLayout(settings); settings_layout.setContentsMargins(18, 14, 18, 14)
+        copy = QVBoxLayout()
+        presence = QLabel("Cat presence"); presence.setStyleSheet("font-size: 14px; font-weight: 700;")
+        hint = QLabel("Show or hide your companion"); hint.setObjectName("subtle")
+        copy.addWidget(presence); copy.addWidget(hint)
+        settings_layout.addLayout(copy); settings_layout.addStretch()
+        self.presence_switch = ToggleSwitch()
+        self.presence_switch.toggled.connect(self._set_presence)
+        settings_layout.addWidget(self.presence_switch)
+        root.addWidget(settings)
+
+        self.walk_btn = QPushButton(); self.walk_btn.setObjectName("primary")
         self.walk_btn.clicked.connect(self._toggle_walk)
-        layout.addWidget(self.walk_btn)
-
-        quit_btn = QPushButton("Quit")
+        root.addWidget(self.walk_btn)
+        quit_btn = QPushButton("Quit Desktop Cat"); quit_btn.setObjectName("secondary")
         quit_btn.clicked.connect(QApplication.instance().quit)
-        layout.addWidget(quit_btn)
+        root.addWidget(quit_btn)
+        root.addStretch()
+        self.refresh()
+
+    def _set_presence(self, is_on):
+        if not self._refreshing:
+            self.pet.show_cat() if is_on else self.pet.hide_cat()
 
     def _toggle_walk(self):
-        self.pet._tray_toggle_walk()  # also updates this panel's + tray's label
+        self.pet._tray_toggle_walk()
+
+    def set_walk_state(self, is_walking):
+        self.walk_btn.setText("Stop following cursor" if is_walking else "Follow my cursor")
+
+    def refresh(self):
+        self._refreshing = True
+        visible = self.pet.isVisible()
+        self.presence_switch.setChecked(visible)
+        self._refreshing = False
+        self.badge.setText("ONLINE" if visible else "RESTING")
+        self.presence_title.setText("Your cat is here" if visible else "Your cat is resting")
+        self.presence_detail.setText("Visible on your desktop and ready to play." if visible else "Turn on Cat presence to bring them back.")
+        self.set_walk_state(self.pet.mode == "WALKING")
 
     def closeEvent(self, event):
         # Closing the panel (the X button) just hides it -- the app keeps
