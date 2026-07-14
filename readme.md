@@ -2,13 +2,13 @@
 
 **Desktop Cat** is a small animated companion that lives directly on the desktop. It brings a little personality to an everyday workspace: the cat rests, notices you, follows your cursor, and can be picked up and placed wherever you like.
 
-![Desktop Cat control panel](.github/images/control-panel.png)
+![Desktop Cat control panel](images/control-panel.png)
 
 ## What it looks like
 
 The cat is shown as pixel-art animation over a transparent background, so it feels like it is sitting naturally on top of the desktop rather than inside a normal application window. Its control panel uses a calm dark interface with purple accents, a cat preview, a live status badge, and a simple on/off switch.
 
-![Desktop Cat on the desktop](.github/images/cat-on-desktop.png)
+![Desktop Cat on the desktop](images/cat-on-desktop.png)
 
 ## What it does
 
